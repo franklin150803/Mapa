@@ -138,7 +138,11 @@
 
                     const glLayer = L.maplibreGL({
                         style: 'vura-map-style.json',
-                        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                        // antialias: suaviza los bordes de los edificios extruidos (fill-extrusion).
+                        // Sin esto, los techos/paredes de los edificios en 3D se ven con dientes de
+                        // sierra muy notorios apenas hay pitch, sobre todo en pantallas retina.
+                        canvasContextAttributes: { antialias: true }
                     }).addTo(map);
 
                     window.glMap = glLayer.getMaplibreMap();
@@ -264,25 +268,97 @@
             return points.length ? L.latLngBounds(points) : null;
         }
 
-        function createVehicleIcon(color, moving, plate, heading) {
+        // ==================== ICONO DE VEHICULO (marcador nativo MapLibre GL) ====================
+        // Antes esto devolvia un L.divIcon (Leaflet), y el marcador vivia en el
+        // pane de Leaflet (DOM 2D) mientras el mapa base + rutas viven en el
+        // canvas WebGL de MapLibre. Leaflet posiciona sus marcadores con SU
+        // PROPIA proyeccion plana (sin pitch/bearing) y los repinta en su
+        // propio ciclo, mientras que el canvas GL se redibuja con throttling
+        // en su propio ciclo (ver L.MaplibreGL: updateInterval=32ms). Son dos
+        // sistemas de render independientes: por eso el bus/las rutas se
+        // "quedaban atras" al rotar/inclinar/pandear el mapa, en vez de moverse
+        // pegados a el.
+        //
+        // La solucion es la misma que ya se aplico a las rutas: sacar el bus
+        // del mundo de Leaflet y ponerlo como maplibregl.Marker, que MapLibre
+        // reposiciona en cada frame usando su propia matriz de proyeccion 3D
+        // (la misma que usan calles/edificios/rutas). Con eso, bus + ruta +
+        // calle quedan en el mismo reloj de renderizado.
+        function buildVehicleMarkerHtml(color, moving, plate, heading) {
             const label = plate ? escapeHtml(String(plate)) : '';
             const rotation = (typeof heading === 'number') ? heading : 0;
-            return L.divIcon({
-                className: 'vehicle-marker',
-                html: `
-                    <div class="vehicle-marker-wrap ${moving ? 'moving' : ''}">
-                        <div class="vehicle-marker-label" style="border-color:${color}; color:${color};">${label}</div>
-                        <div class="vehicle-marker-dot-wrap">
-                            <div class="vehicle-marker-radar" style="background:${color};"></div>
-                            <div class="vehicle-marker-dot" style="background:${color}; box-shadow: 0 0 8px ${color}, 0 0 3px rgba(0,0,0,0.5);">
-                                <div class="vehicle-marker-arrow" style="transform: rotate(${rotation}deg); opacity:${moving ? 1 : 0};">▲</div>
-                            </div>
+            return `
+                <div class="vehicle-marker-wrap ${moving ? 'moving' : ''}">
+                    <div class="vehicle-marker-label" style="border-color:${color}; color:${color};">${label}</div>
+                    <div class="vehicle-marker-dot-wrap">
+                        <div class="vehicle-marker-radar" style="background:${color};"></div>
+                        <div class="vehicle-marker-dot" style="background:${color}; box-shadow: 0 0 8px ${color}, 0 0 3px rgba(0,0,0,0.5);">
+                            <div class="vehicle-marker-arrow" style="transform: rotate(${rotation}deg); opacity:${moving ? 1 : 0};">▲</div>
                         </div>
                     </div>
-                `,
+                </div>
+            `;
+        }
+
+        // Crea el elemento DOM raiz que se le pasa a maplibregl.Marker({element}).
+        // OJO: MapLibre toma posesion de `el.style.transform` para posicionar
+        // el marcador (traduccion en pixeles segun lng/lat). Por eso la
+        // animacion de "entrada" (fade + scale) se aplica al hijo
+        // .vehicle-marker-wrap y NUNCA al elemento raiz, para no pisar el
+        // transform que usa MapLibre para ubicarlo.
+        function createVehicleMarkerElement(color, moving, plate, heading) {
+            const el = document.createElement('div');
+            el.className = 'vehicle-marker';
+            el.innerHTML = buildVehicleMarkerHtml(color, moving, plate, heading);
+            return el;
+        }
+
+        // Compat: driver.js (fuera de esta carpeta, ver README "Fase 2")
+        // todavia puede depender de window.createVehicleIcon devolviendo un
+        // L.divIcon de Leaflet para su propio mapa de conductor. Se deja este
+        // shim para no romperlo mientras no se migre tambien ese archivo a
+        // marcadores nativos. El mapa de PASAJERO (este archivo) ya NO usa
+        // esta funcion internamente: usa createVehicleMarkerElement +
+        // updateVehicleMarkerElement (ver arriba).
+        function createVehicleIcon(color, moving, plate, heading) {
+            return L.divIcon({
+                className: 'vehicle-marker',
+                html: buildVehicleMarkerHtml(color, moving, plate, heading),
                 iconSize: [70, 46],
                 iconAnchor: [35, 40]
             });
+        }
+
+        // Actualiza un marcador existente IN PLACE (sin recrear el DOM cada
+        // tick, que era lo que hacia marker.setIcon(...) antes).
+        function updateVehicleMarkerElement(el, color, moving, plate, heading) {
+            if (!el) return;
+            const wrap = el.querySelector('.vehicle-marker-wrap');
+            if (wrap) wrap.classList.toggle('moving', !!moving);
+
+            const label = el.querySelector('.vehicle-marker-label');
+            if (label) {
+                const text = plate ? escapeHtml(String(plate)) : '';
+                if (label.textContent !== text) label.textContent = text;
+                label.style.borderColor = color;
+                label.style.color = color;
+            }
+
+            const radar = el.querySelector('.vehicle-marker-radar');
+            if (radar) radar.style.background = color;
+
+            const dot = el.querySelector('.vehicle-marker-dot');
+            if (dot) {
+                dot.style.background = color;
+                dot.style.boxShadow = `0 0 8px ${color}, 0 0 3px rgba(0,0,0,0.5)`;
+            }
+
+            const arrow = el.querySelector('.vehicle-marker-arrow');
+            if (arrow) {
+                const rotation = (typeof heading === 'number') ? heading : 0;
+                arrow.style.transform = `rotate(${rotation}deg)`;
+                arrow.style.opacity = moving ? 1 : 0;
+            }
         }
 
         function vehicleKey(companyId, vehicleId) { return companyId + '__' + vehicleId; }
@@ -329,6 +405,11 @@
             });
         }
 
+        // fromLatLng: {lat, lng} (viene de marker.getLngLat() invertido, ver
+        // abajo). toLatLng: [lat, lng]. El marker es un maplibregl.Marker
+        // nativo, asi que se reposiciona con setLngLat (no con el setLatLng
+        // de Leaflet) para que quede sincronizado con el mismo reloj de
+        // render que usan las rutas y el resto de la escena 3D.
         function animateMarkerTo(marker, fromLatLng, toLatLng, durationMs) {
             if (marker._animFrame) {
                 cancelAnimationFrame(marker._animFrame);
@@ -345,7 +426,7 @@
                 const ease = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2;
                 const lat = fromLat + (toLat - fromLat) * ease;
                 const lng = fromLng + (toLng - fromLng) * ease;
-                marker.setLatLng([lat, lng]);
+                marker.setLngLat([lng, lat]);
                 if (t < 1) {
                     marker._animFrame = requestAnimationFrame(step);
                 } else {
@@ -394,27 +475,42 @@
                     }
 
                     if (vehicleMarkers[markerId]) {
-                        const fromLatLng = vehicleMarkers[markerId].getLatLng();
+                        const existing = vehicleMarkers[markerId].getLngLat();
+                        const fromLatLng = { lat: existing.lat, lng: existing.lng };
                         animateMarkerTo(vehicleMarkers[markerId], fromLatLng, [live.lat, live.lng], 2500);
-                        vehicleMarkers[markerId].setIcon(createVehicleIcon(sentidoColor, moving, plateLabel, heading));
+                        updateVehicleMarkerElement(vehicleMarkers[markerId].getElement(), sentidoColor, moving, plateLabel, heading);
                         applyDimClass(vehicleMarkers[markerId], markerId);
                     } else {
-                        const marker = L.marker([live.lat, live.lng], {
-                            icon: createVehicleIcon(sentidoColor, moving, plateLabel, heading)
-                        }).addTo(map);
+                        if (!window.glMap) return; // el mapa GL aun no esta listo
 
-                        const el = marker.getElement && marker.getElement();
-                        if (el) {
-                            el.style.opacity = '0';
-                            el.style.transform += ' scale(0.5)';
+                        const el = createVehicleMarkerElement(sentidoColor, moving, plateLabel, heading);
+                        el.style.cursor = 'pointer';
+                        el.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            showVehiclePanel(companyId, vehicleId);
+                        });
+
+                        // Marcador NATIVO de MapLibre GL (no L.marker de Leaflet):
+                        // vive en la misma escena WebGL que las rutas y respeta
+                        // pitch/bearing igual que ellas, sin quedarse atras.
+                        const marker = new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -6] })
+                            .setLngLat([live.lng, live.lat])
+                            .addTo(window.glMap);
+
+                        // La animacion de entrada va sobre el hijo .vehicle-marker-wrap
+                        // y no sobre `el` (la raiz), porque MapLibre controla
+                        // el.style.transform para el posicionamiento.
+                        const wrap = el.querySelector('.vehicle-marker-wrap');
+                        if (wrap) {
+                            wrap.style.opacity = '0';
+                            wrap.style.transform = 'scale(0.5)';
                             requestAnimationFrame(() => {
-                                el.style.transition = 'opacity 0.35s ease, transform 0.35s cubic-bezier(.34,1.4,.64,1)';
-                                el.style.opacity = '1';
-                                el.style.transform = el.style.transform.replace('scale(0.5)', 'scale(1)');
+                                wrap.style.transition = 'opacity 0.35s ease, transform 0.35s cubic-bezier(.34,1.4,.64,1)';
+                                wrap.style.opacity = '1';
+                                wrap.style.transform = 'scale(1)';
                             });
                         }
 
-                        marker.on('click', () => showVehiclePanel(companyId, vehicleId));
                         vehicleMarkers[markerId] = marker;
                         applyDimClass(marker, markerId);
                     }
@@ -429,7 +525,9 @@
                 if (vehicleMarkers[markerId]._animFrame) {
                     cancelAnimationFrame(vehicleMarkers[markerId]._animFrame);
                 }
-                map.removeLayer(vehicleMarkers[markerId]);
+                // marker.remove() es la API nativa de maplibregl.Marker (ya no
+                // es un L.marker de Leaflet, asi que no se saca via map.removeLayer).
+                vehicleMarkers[markerId].remove();
                 delete vehicleMarkers[markerId];
                 delete vehicleLastKnownPos[markerId];
             }
@@ -646,7 +744,9 @@
         window.setWaitingTarget = setWaitingTarget;
         window.isCompanyRegistered = isCompanyRegistered;
         window.getCompanyStatusBadge = getCompanyStatusBadge;
-        window.createVehicleIcon = createVehicleIcon;
+        window.createVehicleIcon = createVehicleIcon; // compat Leaflet (driver.js), ver nota arriba
+        window.createVehicleMarkerElement = createVehicleMarkerElement;
+        window.updateVehicleMarkerElement = updateVehicleMarkerElement;
         window.animateMarkerTo = animateMarkerTo;
         window.removeVehicleMarker = removeVehicleMarker;
         window.vehicleKey = vehicleKey;
