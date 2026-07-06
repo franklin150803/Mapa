@@ -200,6 +200,9 @@
                                 const res = await fetch(`${OSRM_DEMO_URL}/${coordsParam}?overview=full&geometries=geojson`);
                                 if (!res.ok) {
                                     console.warn('OSRM demo routing error:', res.status);
+                                    if (typeof showToast === 'function') {
+                                        showToast('OSRM respondió con error ' + res.status + ', usando línea recta', 'error');
+                                    }
                                     return null;
                                 }
                                 const data = await res.json();
@@ -208,6 +211,9 @@
                                 return coords.map(c => [c[1], c[0]]); // GeoJSON [lng,lat] -> [lat,lng]
                             } catch (e) {
                                 console.warn('OSRM demo routing error:', e);
+                                if (typeof showToast === 'function') {
+                                    showToast('No se pudo trazar la ruta por calles (OSRM falló), usando línea recta', 'error');
+                                }
                                 return null;
                             }
                         }
