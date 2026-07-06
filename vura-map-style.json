@@ -526,7 +526,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#1a2030",
+        "line-color": "#232b42",
         "line-opacity": [
           "interpolate",
           [
@@ -535,9 +535,9 @@
           [
             "zoom"
           ],
-          12,
+          11.3,
           0,
-          12.5,
+          12,
           1
         ],
         "line-width": [
@@ -607,7 +607,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#1d2433",
+        "line-color": "#283153",
         "line-width": [
           "interpolate",
           [
@@ -662,7 +662,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#141a28",
+        "line-color": "#222c4a",
         "line-width": [
           "interpolate",
           [
@@ -726,7 +726,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#161d2e",
+        "line-color": "#25304f",
         "line-width": [
           "interpolate",
           [
@@ -797,7 +797,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#374260",
+        "line-color": "#4b5a82",
         "line-width": [
           "interpolate",
           [
@@ -857,7 +857,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#4a5a7a",
+        "line-color": "#6178ac",
         "line-width": [
           "interpolate",
           [
@@ -925,9 +925,9 @@
             "zoom"
           ],
           5,
-          "#4f5d7e",
+          "#6b7aa8",
           10,
-          "#8291b8"
+          "#a8b8e8"
         ],
         "line-width": [
           "interpolate",
@@ -1001,9 +1001,9 @@
             "zoom"
           ],
           5,
-          "#5f6e93",
+          "#7c8cc8",
           10,
-          "#a3b3dc"
+          "#c3d0f5"
         ],
         "line-width": [
           "interpolate",
@@ -1234,15 +1234,13 @@
       }
     },
     {
-      "id": "building",
-      "type": "fill",
+      "id": "building-3d",
+      "type": "fill-extrusion",
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 13,
-      "maxzoom": 17,
       "paint": {
-        "fill-color": "#171c28",
-        "fill-outline-color": [
+        "fill-extrusion-base": [
           "interpolate",
           [
             "linear"
@@ -1251,49 +1249,49 @@
             "zoom"
           ],
           13,
-          "rgba(34,211,238,0.05)",
-          15,
-          "rgba(34,211,238,0.2)",
-          17,
-          "rgba(34,211,238,0.35)"
-        ]
-      }
-    },
-    {
-      "id": "building-3d",
-      "type": "fill-extrusion",
-      "source": "openmaptiles",
-      "source-layer": "building",
-      "minzoom": 16,
-      "paint": {
-        "fill-extrusion-base": [
-          "coalesce",
+          0,
+          16,
           [
-            "get",
-            "render_min_height"
-          ],
-          0
+            "coalesce",
+            [
+              "get",
+              "render_min_height"
+            ],
+            0
+          ]
         ],
         "fill-extrusion-color": "#1a202d",
         "fill-extrusion-height": [
-          "case",
+          "interpolate",
           [
-            ">",
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          13,
+          0,
+          16,
+          [
+            "case",
             [
-              "coalesce",
+              ">",
               [
-                "get",
-                "render_height"
+                "coalesce",
+                [
+                  "get",
+                  "render_height"
+                ],
+                0
               ],
               0
             ],
-            0
-          ],
-          [
-            "get",
-            "render_height"
-          ],
-          6
+            [
+              "get",
+              "render_height"
+            ],
+            6
+          ]
         ],
         "fill-extrusion-opacity": 0.88,
         "fill-extrusion-vertical-gradient": true
