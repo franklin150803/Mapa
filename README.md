@@ -1,4 +1,4 @@
-# mapa/ — Módulo de mapa de VURA
+# mapa/ — Módulo de mapa de VURA 
 
 Todo el código que dibuja el mapa (Leaflet + MapLibre GL, marcadores de
 vehículo, líneas de ruta, ETA/distancia) vive **separado** del resto de la
