@@ -170,7 +170,7 @@
                     });
                 }
 
-                // ==================== ROUTING REAL (ORS via Cloud Function) ====================
+                // ==================== ROUTING REAL (ORS via Cloud Function, con fallback OSRM) ====================
                         // ORS_API_KEY eliminado - ahora se usa Firebase Cloud Function getOrsRoute
                         const routeCache = {};
 
@@ -181,36 +181,78 @@
                         // - Vercel: /api/getOrsRoute
                         const FUNCTIONS_BASE_URL = 'https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net';
 
+                        // Servidor demo publico de OSRM (gratis, sin API key). Se usa
+                        // SOLO como fallback mientras no haya Cloud Function desplegada
+                        // (FUNCTIONS_BASE_URL sigue con el placeholder YOUR_PROJECT_ID).
+                        // Sin esto, showRoute() dibujaba routePointsIda/Retorno crudos
+                        // (2-6 puntos separados por kilometros) en linea recta, sin pasar
+                        // por ningun motor de ruteo — por eso la ruta cortaba en diagonal
+                        // a traves de manzanas en vez de seguir las calles reales.
+                        // Politica de uso del demo: max ~1 req/seg, uso razonable/no
+                        // comercial, sin garantia de uptime.
+                        // https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server
+                        const OSRM_DEMO_URL = 'https://router.project-osrm.org/route/v1/driving';
+
+                        async function fetchRouteFromOsrmDemo(points) {
+                            try {
+                                // OSRM quiere "lng,lat;lng,lat;...", nuestros puntos vienen [lat,lng]
+                                const coordsParam = points.map(p => `${p[1]},${p[0]}`).join(';');
+                                const res = await fetch(`${OSRM_DEMO_URL}/${coordsParam}?overview=full&geometries=geojson`);
+                                if (!res.ok) {
+                                    console.warn('OSRM demo routing error:', res.status);
+                                    return null;
+                                }
+                                const data = await res.json();
+                                const coords = data?.routes?.[0]?.geometry?.coordinates;
+                                if (!coords || !coords.length) return null;
+                                return coords.map(c => [c[1], c[0]]); // GeoJSON [lng,lat] -> [lat,lng]
+                            } catch (e) {
+                                console.warn('OSRM demo routing error:', e);
+                                return null;
+                            }
+                        }
+
                         async function fetchOrsRoute(points) {
                             if (!points || points.length < 2) return null;
-                            if (FUNCTIONS_BASE_URL.toLowerCase().includes('your_project_id')) return null;
 
                             const key = points.map(p => `${p[0].toFixed(5)},${p[1].toFixed(5)}`).join('|');
                             if (routeCache[key]) return routeCache[key];
 
-                            try {
-                                const res = await fetch(`${FUNCTIONS_BASE_URL}/getOrsRoute`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ data: { coordinates: points } }), // Callable protocol
-                                });
+                            // 1) Cloud Function propia (produccion), solo si esta configurada.
+                            if (!FUNCTIONS_BASE_URL.toLowerCase().includes('your_project_id')) {
+                                try {
+                                    const res = await fetch(`${FUNCTIONS_BASE_URL}/getOrsRoute`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ data: { coordinates: points } }), // Callable protocol
+                                    });
 
-                                if (!res.ok) {
-                                    console.warn('Cloud Function routing error:', res.status);
-                                    return null;
+                                    if (res.ok) {
+                                        const data = await res.json();
+                                        // Callable protocol response: { data: { coordinates: [...] } }
+                                        const latLngs = data?.data?.coordinates || data?.coordinates;
+                                        if (latLngs && latLngs.length) {
+                                            routeCache[key] = latLngs;
+                                            return latLngs;
+                                        }
+                                    } else {
+                                        console.warn('Cloud Function routing error:', res.status);
+                                    }
+                                } catch (e) {
+                                    console.warn('Cloud Function routing error:', e);
                                 }
-
-                                const data = await res.json();
-                                // Callable protocol response: { data: { coordinates: [...] } }
-                                const latLngs = data?.data?.coordinates || data?.coordinates;
-                                if (!latLngs || !latLngs.length) return null;
-
-                                routeCache[key] = latLngs;
-                                return latLngs;
-                            } catch (e) {
-                                console.warn('Cloud Function routing error:', e);
-                                return null;
                             }
+
+                            // 2) Fallback: OSRM demo (gratis, sin key) mientras no haya
+                            // Cloud Function desplegada.
+                            const osrmLatLngs = await fetchRouteFromOsrmDemo(points);
+                            if (osrmLatLngs) {
+                                routeCache[key] = osrmLatLngs;
+                                return osrmLatLngs;
+                            }
+
+                            // 3) Ultimo recurso: null -> showRoute() usa los puntos crudos.
+                            return null;
                         }
 
         // ==================== MOSTRAR RUTAS (MODIFICADO) ====================
